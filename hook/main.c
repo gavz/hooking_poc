@@ -14,20 +14,7 @@ typedef struct _ImageSectionInfo
 
 typedef int (* MsgBoxType)(HWND, LPCTSTR, LPCTSTR, UINT, WORD);
 
-void __declspec(noinline) print_string() {
-	int a, b;
-	a = 1;
-	b = 2;
-	printf("%d", a + b);
-	puts("Just a string!");
-}
-
-int __declspec(noinline) hook() {
-	printf("Hook!");
-	return 0;
-}
-
-void get_module_info(HMODULE handle, ImageSectionInfo* pSectionInfo) {
+void get_rdata_info(HMODULE handle, ImageSectionInfo* pSectionInfo) {
 	PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)handle;
 	PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((uint8_t*)dosHeader + dosHeader->e_lfanew);
 	PIMAGE_SECTION_HEADER pSectionHdr = (IMAGE_SECTION_HEADER *)(ntHeaders + 1);
@@ -193,7 +180,7 @@ void myVirtualProtect(LPVOID lpAddress, SIZE_T size, DWORD protection, DWORD *ol
 }
 
 int main() {
-	uint8_t trampoline_code[14];
+	uint8_t bait_code[14];
 	DWORD dwOldProtect;
 	size_t damaged_instructions_len;
 	uint64_t * hook_body_offset = 0;
@@ -219,12 +206,12 @@ int main() {
 		0x48, 0xb8, 0x48, 0x47, 0x46, 0x45, 0x44, 0x43, 0x42, 0x41, // movabs rax, 0x4142434445464748
 		0x48, 0x89, 0x02 // mov qword ptr [rdx], rax
 	};
-	// TODO: copy payload to hook body
-	// payload = push rip; trampoline to hook()
-	// memcpy(pHookBody, shellcode, sizeof(shellcode));
-	get_module_info(selfHandle, &sectionInfo);
-	printf("SectionAddress: 0x%p\n", sectionInfo.SectionAddress);
-	printf("SectionSize: 0x%p\n", sectionInfo.SectionSize);
+
+	get_rdata_info(selfHandle, &sectionInfo);
+
+	
+
+	// copy payload
 	myVirtualProtect((LPVOID)sectionInfo.SectionAddress, sectionInfo.SectionSize, PAGE_EXECUTE_READWRITE, &dwOldProtect);
 	memcpy(hook_body_offset, payload, sizeof(payload));
 	hook_body_offset = (char*)pHookBody + sizeof(payload);
@@ -234,20 +221,18 @@ int main() {
 	hook_body_offset = (char*)hook_body_offset + damaged_instructions_len;
 
 	// return to hooked place
-	get_bait_code(trampoline_code, (char*)MsgBox + damaged_instructions_len);
-	memcpy(hook_body_offset, trampoline_code, sizeof(trampoline_code));
-	hook_body_offset = (char*)hook_body_offset + sizeof(trampoline_code);
+	get_bait_code(bait_code, (char*)MsgBox + damaged_instructions_len);
+	memcpy(hook_body_offset, bait_code, sizeof(bait_code));
+	hook_body_offset = (char*)hook_body_offset + sizeof(bait_code);
 
-	//get_trampoline_code(trampoline_code, &hook);
-	get_bait_code(trampoline_code, pHookBody);
+	// hook function
+	get_bait_code(bait_code, pHookBody);
+	myVirtualProtect((LPVOID)(user32 + 0x1000), 0x9d000, PAGE_EXECUTE_READWRITE, &dwOldProtect);
+	memcpy(MsgBox, bait_code, sizeof(bait_code));
 
-	//myVirtualProtect(selfHandle, 0x2000, PAGE_EXECUTE_READWRITE, &dwOldProtect);
-	myVirtualProtect((LPVOID)(user32+0x1000), 0x9d000, PAGE_EXECUTE_READWRITE, &dwOldProtect);
-	memcpy(MsgBox, trampoline_code, sizeof(trampoline_code));
+	
 
-	//print_string();
 	MsgBox(NULL, "Text After Hook", "After Hook", 0, 0);
 
-	getchar();
 	return 0;
 }
